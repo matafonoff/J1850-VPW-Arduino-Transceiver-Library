@@ -1,0 +1,23 @@
+#######################################
+# Syntax Coloring Map For J1850-Arduino-Transceiver-Library
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+J1850VPW	KEYWORD1
+FastPin	    KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+setValue	KEYWORD2
+
+setRxPin	KEYWORD2
+setTxPin	KEYWORD2
+init	    KEYWORD2
+recv_msg	KEYWORD2
+send_msg	KEYWORD2
+crc	        KEYWORD2
