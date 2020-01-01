@@ -12,8 +12,8 @@ Use following schematics to connect Arduino to real J1850VPW bus of your vehicle
 ![schematics](img/schematics.jpg)
 
 Connections:
-* IN -> RX pin of Arduino
-* OUT -> TX pin of Arduino
+* IN -> pin of Arduino that is configured as RX pin for J1850VPW
+* OUT -> pin of Arduino that is configured as RX pin for J1850VPW
 * BUS -> J1850VPW bus (ex. vehicle)
 
 ## Code example
