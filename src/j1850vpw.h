@@ -9,6 +9,7 @@
 **************************************************************************/
 #pragma once
 #include <Arduino.h>
+#include "common.h"
 
 enum J1850_ERRORS {
     J1850_OK                        = 0x00,
@@ -25,8 +26,6 @@ enum J1850_Operations {
     J1850_Read,
     J1850_Write
 };
-
-#define BS                      12
 
 typedef void (*onErrorHandler)(J1850_Operations op, J1850_ERRORS err);
 

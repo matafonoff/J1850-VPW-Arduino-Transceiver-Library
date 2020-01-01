@@ -6,7 +6,23 @@
 # Datatypes (KEYWORD1)
 #######################################
 
-J1850VPW	KEYWORD1
+J1850VPW	                    KEYWORD1
+
+J1850_ERRORS                    KEYWORD1
+J1850_OK                        KEYWORD1
+J1850_ERR_BUS_IS_BUSY           KEYWORD1
+J1850_ERR_BUS_ERROR             KEYWORD1
+J1850_ERR_RECV_NOT_CONFIGURATED KEYWORD1
+J1850_ERR_PULSE_TOO_SHORT       KEYWORD1
+J1850_ERR_PULSE_OUTSIDE_FRAME   KEYWORD1
+J1850_ERR_ARBITRATION_LOST      KEYWORD1
+J1850_ERR_PULSE_TOO_LONG        KEYWORD1
+
+J1850_Operations                KEYWORD1
+J1850_Write                     KEYWORD1
+J1850_Read                      KEYWORD1
+
+onErrorHandler                  KEYWORD1
 
 #######################################
 # Methods and Functions (KEYWORD2)
@@ -16,8 +32,6 @@ setActiveLevel	        KEYWORD2
 init	                KEYWORD2
 tryGetReceivedFrame	    KEYWORD2
 send	                KEYWORD2
+onError                 KEYWORD2
 
-J1850_OK                KEYWORD2
-J1850_ERR_BUS_IS_BUSY   KEYWORD2
-J1850_ERR_BUS_ERROR     KEYWORD2
 

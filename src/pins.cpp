@@ -1,3 +1,12 @@
+/*************************************************************************
+**  AVR J1850VPW VPW Interface
+**  by Stepan Matafonov
+**
+**  Released under Microsoft Public License
+**
+**  contact: matafonoff@gmail.com
+**  homepage: xelb.ru
+**************************************************************************/
 #include "pins.h"
 #include "wiring_private.h"
 
