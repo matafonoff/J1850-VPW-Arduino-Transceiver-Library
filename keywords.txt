@@ -7,17 +7,17 @@
 #######################################
 
 J1850VPW	KEYWORD1
-FastPin	    KEYWORD1
 
 #######################################
 # Methods and Functions (KEYWORD2)
 #######################################
 
-setValue	KEYWORD2
+setActiveLevel	        KEYWORD2
+init	                KEYWORD2
+tryGetReceivedFrame	    KEYWORD2
+send	                KEYWORD2
 
-setRxPin	KEYWORD2
-setTxPin	KEYWORD2
-init	    KEYWORD2
-recv_msg	KEYWORD2
-send_msg	KEYWORD2
-crc	        KEYWORD2
+J1850_OK                KEYWORD2
+J1850_ERR_BUS_IS_BUSY   KEYWORD2
+J1850_ERR_BUS_ERROR     KEYWORD2
+

@@ -10,21 +10,31 @@
 #include "j1850vpw.h"
 #include <pins_arduino.h>
 #include <stdlib.h>
+#include "pins.h"
+#include "storage.h"
+#include "interrupts.h"
 
-#define MAX_uS ((uint64_t)-1L)
+typedef unsigned long ulong;
+
+#define MAX(a, b) ((a) < (b) ? (b) : (a))
+
+#define MAX_uS ((ulong)-1L)
 
 #define RX_SOF_MIN (163)
 #define RX_SOF_MAX (239)
 
-#define RX_EOD_MIN (163) // minimum end of data time
+#define RX_EOD_MIN (164) // minimum end of data time
+#define RX_EOF_MIN (239) // minimum end of data time
 
 #define RX_SHORT_MIN (34) // minimum short pulse time
 #define RX_SHORT_MAX (96) // maximum short pulse time
 
-#define RX_LONG_MIN (96)  // minimum long pulse time
+#define RX_LONG_MIN (97)  // minimum long pulse time
 #define RX_LONG_MAX (163) // maximum long pulse time
 
 #define RX_EOD_MAX (239) // maximum end of data time
+
+#define RX_PULSE_MAX (3000)
 
 #define TX_SHORT (64) // Short pulse nominal time
 #define TX_LONG (128) // Long pulse nominal time
@@ -36,187 +46,95 @@
 
 static uint8_t ACTIVE = LOW;
 static uint8_t PASSIVE = HIGH;
-static uint8_t RX = -1;
-static uint8_t TX = -1;
+static int8_t RX = -1;
 
-volatile uint8_t *port_to_pcmask[] = {
-    &PCMSK0,
-    &PCMSK1,
-    &PCMSK2};
+static Pin __rxPin = Pin();
+static Pin __txPin = Pin();
 
-static int PCintMode;
-
-typedef void (*funcPtr)(uint8_t value);
-volatile static funcPtr PCintFunc = NULL;
-
-volatile uint8_t PCintLast[3];
 void onRxChaged(uint8_t curr);
 
-void PCattachInterrupt(uint8_t pin, int mode)
+volatile onErrorHandler __errHandler = NULL;
+
+J1850_ERRORS handleErrorsInternal(J1850_Operations op, J1850_ERRORS err)
 {
-    uint8_t bit = digitalPinToBitMask(pin);
-    uint8_t port = digitalPinToPort(pin);
-    volatile uint8_t *pcmask;
-
-    // map pin to PCIR register
-    if (port == NOT_A_PORT)
+    if (err != J1850_OK)
     {
-        return;
-    }
-    else
-    {
-        port -= 2;
-        pcmask = port_to_pcmask[port];
-    }
-
-    PCintMode = mode;
-    PCintFunc = onRxChaged;
-    // set the mask
-    *pcmask |= bit;
-    // enable the interrupt
-    PCICR |= 0x01 << port;
-}
-
-void PCdetachInterrupt(uint8_t pin)
-{
-    uint8_t bit = digitalPinToBitMask(pin);
-    uint8_t port = digitalPinToPort(pin);
-    volatile uint8_t *pcmask;
-
-    // map pin to PCIR register
-    if (port == NOT_A_PORT)
-    {
-        return;
-    }
-    else
-    {
-        port -= 2;
-        pcmask = port_to_pcmask[port];
-    }
-
-    // disable the mask.
-    *pcmask &= ~bit;
-    // if that's the last one, disable the interrupt.
-    if (*pcmask == 0)
-    {
-        PCICR &= ~(0x01 << port);
-    }
-}
-
-// common code for isr handler. "port" is the PCINT number.
-// there isn't really a good way to back-map ports and masks to pins.
-static void PCint(uint8_t port)
-{
-    if (PCintFunc == NULL)
-    {
-        // No ISR handler attached. just skipping
-        return;
-    }
-    uint8_t bit;
-    uint8_t curr;
-    uint8_t mask;
-    uint8_t pin;
-    uint8_t currValue;
-
-    // get the pin states for the indicated port.
-    curr = *portInputRegister(port + 2);
-    mask = curr ^ PCintLast[port];
-    PCintLast[port] = curr;
-    // mask is pins that have changed. screen out non pcint pins.
-    if ((mask &= *port_to_pcmask[port]) == 0)
-    {
-        return;
-    }
-
-    // mask is pcint pins that have changed.
-    for (uint8_t i = 0; i < 8; i++)
-    {
-        bit = 0x01 << i;
-        if (bit & mask)
+        onErrorHandler errHandler = __errHandler;
+        if (errHandler)
         {
-            pin = port * 8 + i;
-            // Trigger interrupt if mode is CHANGE, or if mode is RISING and
-            // the bit is currently high, or if mode is FALLING and bit is low.
-            currValue = curr & bit ? HIGH : LOW;
-            if ((PCintMode == CHANGE || ((PCintMode == RISING) && currValue) || ((PCintMode == FALLING) && !currValue)))
+            errHandler(op, err);
+        }
+    }
+
+    return err;
+}
+
+uint8_t crc(uint8_t *msg_buf, int8_t nbytes)
+{
+    uint8_t crc_reg = 0xff, poly, byte_count, bit_count;
+    uint8_t *byte_point;
+    uint8_t bit_point;
+
+    for (byte_count = 0, byte_point = msg_buf; byte_count < nbytes; ++byte_count, ++byte_point)
+    {
+        for (bit_count = 0, bit_point = 0x80; bit_count < 8; ++bit_count, bit_point >>= 1)
+        {
+            if (bit_point & *byte_point) // case for new bit = 1
             {
-                PCintFunc(currValue);
+                if (crc_reg & 0x80)
+                    poly = 1; // define the polynomial
+                else
+                    poly = 0x1c;
+                crc_reg = ((crc_reg << 1) | 1) ^ poly;
+            }
+            else // case for new bit = 0
+            {
+                poly = 0;
+                if (crc_reg & 0x80)
+                    poly = 0x1d;
+                crc_reg = (crc_reg << 1) ^ poly;
             }
         }
     }
+    return ~crc_reg; // Return CRC
 }
 
-SIGNAL(PCINT0_vect)
-{
-    PCint(0);
-}
-SIGNAL(PCINT1_vect)
-{
-    PCint(1);
-}
-SIGNAL(PCINT2_vect)
-{
-    PCint(2);
-}
-
-uint64_t _lastChange = micros();
+ulong _lastChange = micros();
 volatile bool _sofRead = false;
-volatile uint8_t _currState;
+volatile uint8_t _currState = ACTIVE;
 volatile uint8_t _bit = 0;
 volatile uint8_t _byte = 0;
 uint8_t _buff[BS];
 uint8_t *msg_buf;
 
-#define STORAGE_SIZE 50
-
-class StorageItem
-{
-public:
-    uint8_t content[BS];
-    uint8_t size;
-};
-
-static StorageItem _storage[STORAGE_SIZE] = {0};
-volatile static int8_t _first = -1;
-volatile static int8_t _last = -1;
+static Storage _storage = Storage();
 
 void onFrameRead()
 {
-    if (!IS_BETWEEN(_byte, 0 , BS))
+    if (!IS_BETWEEN(_byte, 2, BS))
     {
         return;
     }
 
-    _last++;
-    if (_last >= STORAGE_SIZE)
-    {
-        _last = 0;
-    }
-
-    if (_first == -1)
-    {
-        _first = _last;
-    }
-    else if (_first == _last)
-    {
-        _first++;
-        if (_first >= STORAGE_SIZE)
-        {
-            _first = 0;
-        }
-    }
-
-    memcpy(_storage[_last].content, _buff, BS);
-    _storage[_last].size = _byte;
+    _storage.push(_buff, _byte);
 }
+
+class BitInfo
+{
+public:
+    bool isActive;
+    int length;
+};
+
+BitInfo bits[BS];
 
 void onRxChaged(uint8_t curr)
 {
     _currState = curr;
     curr = !curr;
 
-    uint64_t now = micros();
-    uint64_t diff;
+    ulong now = micros();
+    ulong diff;
 
     if (now < _lastChange)
     {
@@ -234,8 +152,16 @@ void onRxChaged(uint8_t curr)
     {
         // too short to be a valid pulse. Data error
         _sofRead = false;
+        handleErrorsInternal(J1850_Read, J1850_ERR_PULSE_TOO_SHORT);
         return;
     }
+
+    // if (_sofRead && diff > RX_PULSE_MAX)
+    // {
+    //     _sofRead = false;
+    //     handleErrorsInternal(J1850_Read, J1850_ERR_PULSE_TOO_LONG);
+    //     return;
+    // }
 
     if (!_sofRead)
     {
@@ -246,13 +172,17 @@ void onRxChaged(uint8_t curr)
             msg_buf = _buff;
             *msg_buf = 0;
         }
+        else
+        {
+            handleErrorsInternal(J1850_Read, J1850_ERR_PULSE_OUTSIDE_FRAME);
+        }
         return;
     }
 
     *msg_buf <<= 1;
     if (curr == PASSIVE)
     {
-        if (diff > RX_EOD_MIN)
+        if (diff > RX_EOF_MIN)
         {
             // data ended - copy package to buffer
             _sofRead = false;
@@ -266,7 +196,7 @@ void onRxChaged(uint8_t curr)
             *msg_buf |= 1;
         }
     }
-    else if (diff < RX_SHORT_MAX)
+    else if (diff <= RX_SHORT_MAX)
     {
         *msg_buf |= 1;
     }
@@ -301,114 +231,92 @@ static void J1850VPW::setActiveLevel(uint8_t active)
     }
 }
 
-static void J1850VPW::initReceiver(uint8_t pin)
+static void J1850VPW::init(uint8_t rxPin, uint8_t txPin)
 {
-    if (RX != -1)
-    {
-        PCdetachInterrupt(RX);
-    }
-    RX = pin;
-    pinMode(RX, INPUT_PULLUP);
-    PCattachInterrupt(RX, CHANGE);
+    __rxPin = Pin(rxPin, PIN_MODE_INPUT_PULLUP);
+
+    _currState = __rxPin.read();
+    __rxPin.attachInterrupt(PIN_CHANGE_BOTH, onRxChaged);
+
+    __txPin = Pin(txPin, PIN_MODE_OUTPUT);
+    __txPin.write(PASSIVE);
 }
 
-uint8_t *_txReg = NULL;
-uint8_t _txBit = 0;
-
-inline bool sendPulse(uint8_t value, int16_t duration)
+// NB! Performance critical!!! Do not split
+static uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*/)
 {
-    uint64_t start = micros();
-
-    if (value)
+    if (__rxPin.isEmpty())
     {
-        *_txReg &= ~_txBit;
-    }
-    else
-    {
-        *_txReg |= _txBit;
+        return handleErrorsInternal(J1850_Write, J1850_ERR_RECV_NOT_CONFIGURATED);
     }
 
-    while (true)
+    uint8_t result = J1850_OK;
+    static uint8_t buff[BS];
+    memcpy(buff, pData, nbytes);
+    buff[nbytes] = crc(buff, nbytes);
+    nbytes++;
+
+    __rxPin.pauseInterrupts();
+
+    uint8_t *msg_buf = buff;
+    unsigned long now;
+
+    // wait for idle
+    if (timeoutMs >= 0)
     {
-        if (value == PASSIVE && _currState != value)
+        now = micros();
+        ulong start = now;
+        timeoutMs *= 1000; // convert to microseconds
+        while (micros() - now < TX_EOF)
         {
-            // BUS ERROR
-            return false;
-        }
-        uint64_t now = micros();
+            if (__rxPin.read() == ACTIVE)
+            {
+                now = micros();
+            }
 
-        if (now < start)
-        {
-            // overflow occured
-            duration -= MAX_uS - start;
-            start = 0;
-        }
-
-        if (now - start >= duration)
-        {
-            break;
-        }
-    }
-
-    return true;
-}
-
-static void J1850VPW::initTransmitter(uint8_t pin)
-{
-    pinMode(pin, OUTPUT);
-    uint8_t timer = digitalPinToTimer(pin);
-    uint8_t bit = digitalPinToBitMask(pin);
-    uint8_t port = digitalPinToPort(pin);
-
-    if (port == NOT_A_PIN)
-    {
-        return;
-    }
-
-    // If the pin that support PWM output, we need to turn it off
-    // before doing a digital write.
-    // TODO turn pwm off
-    // if (timer != NOT_ON_TIMER) {
-    // 	turnOffPWM(timer);
-    // }
-
-    _txReg = portOutputRegister(port);
-    _txBit = bit;
-}
-
-static uint8_t J1850VPW::send(uint8_t *msg_buf, uint8_t nbytes, uint32_t timeoutMs /*= -1*/)
-{
-    uint64_t now = millis();
-    while (_sofRead || _currState != PASSIVE)
-    {
-        if (timeoutMs > 0 && millis() - now > timeoutMs)
-        {
-            return J1850_ERR_BUS_IS_BUSY;
+            if (micros() - start > timeoutMs)
+            {
+                result = J1850_ERR_BUS_IS_BUSY;
+                goto stop;
+            }
         }
     }
 
     // SOF
-    sendPulse(ACTIVE, TX_SOF);
+    __txPin.write(ACTIVE);
+    now = micros();
+    while (micros() - now < TX_SOF)
+        ;
 
     // send data
     do
     {
         uint8_t temp_byte = *msg_buf; // store byte temporary
         uint8_t nbits = 8;
+        ulong delay;
         while (nbits--) // send 8 bits
         {
-            uint8_t delay = (temp_byte & 0x80) ? TX_LONG : TX_SHORT; // send correct pulse lenght
-
             if (nbits & 1) // start allways with passive symbol
             {
-                if (!sendPulse(PASSIVE, delay)) // set bus passive
+                delay = (temp_byte & 0x80) ? TX_LONG : TX_SHORT; // send correct pulse lenght
+                __txPin.write(PASSIVE);                          // set bus active
+                now = micros();
+                while (micros() - now < delay)
                 {
-                    return J1850_ERR_BUS_ERROR; // error, bus collision!
+                    if (__rxPin.read() == ACTIVE)
+                    {
+                        result = J1850_ERR_ARBITRATION_LOST;
+                        goto stop;
+                    }
                 }
             }
             else // send active symbol
             {
-                sendPulse(ACTIVE, delay); // set bus active
+                delay = (temp_byte & 0x80) ? TX_SHORT : TX_LONG; // send correct pulse lenght
+                __txPin.write(ACTIVE);                           // set bus active
+                now = micros();
+                while (micros() - now < delay)
+                    ;
             }
 
             temp_byte <<= 1; // next bit
@@ -417,41 +325,44 @@ static uint8_t J1850VPW::send(uint8_t *msg_buf, uint8_t nbytes, uint32_t timeout
     } while (--nbytes);      // end nbytes do loop
 
     // EOF
-    sendPulse(PASSIVE, TX_EOF);
-
-    return 0;
-}
-
-    static void J1850VPW::getFirstAndLast(uint8_t *pFirst, uint8_t *pLast){
-        *pFirst = _first;
-        *pLast = _last;
-    }
-
-static int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff)
-{
-    if (_first == -1 || _last == -1)
+    __txPin.write(PASSIVE);
+    now = micros();
+    while (micros() - now < TX_SOF)
     {
-        return 0;
-    }
-
-    StorageItem *ptr = &_storage[_first];
-    
-    memcpy(pBuff, ptr->content, ptr->size);
-
-    if (_first == _last)
-    {
-        _first = -1;
-        _last = -1;
-    }
-    else
-    {
-        _first++;
-        if (_first >= STORAGE_SIZE)
+        if (__rxPin.read() == ACTIVE)
         {
-            _first = 0;
+            result = J1850_ERR_ARBITRATION_LOST;
+            goto stop;
         }
     }
 
-   
-    return ptr->size;
+stop:
+    __rxPin.resumeInterrupts();
+    return handleErrorsInternal(J1850_Write, result);
+}
+
+static void J1850VPW::onError(onErrorHandler errHandler)
+{
+    __errHandler = errHandler;
+}
+
+static int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff, bool justValid /*= true*/)
+{
+    uint8_t size;
+
+    while (true)
+    {
+        size = _storage.tryPopItem(pBuff);
+        if (!size)
+        {
+            return 0;
+        }
+
+        if (!justValid || crc(pBuff, size - 1) == pBuff[size - 1])
+        {
+            break;
+        }
+    }
+
+    return size;
 }
