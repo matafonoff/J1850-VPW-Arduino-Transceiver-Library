@@ -69,6 +69,10 @@ J1850_ERRORS handleErrorsInternal(J1850_Operations op, J1850_ERRORS err)
     return err;
 }
 
+void detachInterruptsOnPinDisposed(Pin* p) {
+    PCdetachInterrupt(p->pin());
+}
+
 uint8_t crc(uint8_t *msg_buf, int8_t nbytes)
 {
     uint8_t crc_reg = 0xff, poly, byte_count, bit_count;
@@ -156,13 +160,6 @@ void onRxChaged(uint8_t curr)
         return;
     }
 
-    // if (_sofRead && diff > RX_PULSE_MAX)
-    // {
-    //     _sofRead = false;
-    //     handleErrorsInternal(J1850_Read, J1850_ERR_PULSE_TOO_LONG);
-    //     return;
-    // }
-
     if (!_sofRead)
     {
         if (_sofRead = (curr == ACTIVE && IS_BETWEEN(diff, RX_SOF_MIN, RX_SOF_MAX)))
@@ -234,10 +231,11 @@ static void J1850VPW::setActiveLevel(uint8_t active)
 static void J1850VPW::init(uint8_t rxPin, uint8_t txPin)
 {
     __rxPin = Pin(rxPin, PIN_MODE_INPUT_PULLUP);
+    __rxPin.onDispose(detachInterruptsOnPinDisposed);
 
     _currState = __rxPin.read();
-    __rxPin.attachInterrupt(PIN_CHANGE_BOTH, onRxChaged);
-
+    PCattachInterrupt(__rxPin.pin(), PIN_CHANGE_BOTH, onRxChaged);
+    
     __txPin = Pin(txPin, PIN_MODE_OUTPUT);
     __txPin.write(PASSIVE);
 }
@@ -255,8 +253,18 @@ static uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs 
     memcpy(buff, pData, nbytes);
     buff[nbytes] = crc(buff, nbytes);
     nbytes++;
-
-    __rxPin.pauseInterrupts();
+    
+    //         Serial.print("QQQ: ");
+    // for (int q = 0; q < nbytes; q++) {
+    //     uint8_t w = buff[q];
+    //     if (w < 0x10) {
+    //         Serial.print('0');
+    //     }
+    //     Serial.print(String(w, HEX));
+    // }
+    // Serial.println();
+    
+    PCpauseInterrupt(__rxPin.pin());
 
     uint8_t *msg_buf = buff;
     unsigned long now;
@@ -337,7 +345,7 @@ static uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs 
     }
 
 stop:
-    __rxPin.resumeInterrupts();
+    PCresumeInterrupt(__rxPin.pin());
     return handleErrorsInternal(J1850_Write, result);
 }
 
