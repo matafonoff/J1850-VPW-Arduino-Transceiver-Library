@@ -10,8 +10,6 @@
 #include "j1850vpw.h"
 #include <pins_arduino.h>
 #include <stdlib.h>
-#include "pins.h"
-#include "storage.h"
 #include "interrupts.h"
 
 typedef unsigned long ulong;
@@ -43,31 +41,6 @@ typedef unsigned long ulong;
 #define TX_EOF (280)  // End Of Frame nominal time
 
 #define IS_BETWEEN(x, min, max) (x >= min && x <= max)
-
-static uint8_t ACTIVE = LOW;
-static uint8_t PASSIVE = HIGH;
-static int8_t RX = -1;
-
-static Pin __rxPin = Pin();
-static Pin __txPin = Pin();
-
-void onRxChaged(uint8_t curr);
-
-volatile onErrorHandler __errHandler = NULL;
-
-J1850_ERRORS handleErrorsInternal(J1850_Operations op, J1850_ERRORS err)
-{
-    if (err != J1850_OK)
-    {
-        onErrorHandler errHandler = __errHandler;
-        if (errHandler)
-        {
-            errHandler(op, err);
-        }
-    }
-
-    return err;
-}
 
 void detachInterruptsOnPinDisposed(Pin* p) {
     PCdetachInterrupt(p->pin());
@@ -103,36 +76,22 @@ uint8_t crc(uint8_t *msg_buf, int8_t nbytes)
     return ~crc_reg; // Return CRC
 }
 
-ulong _lastChange = micros();
-volatile bool _sofRead = false;
-volatile uint8_t _currState = ACTIVE;
-volatile uint8_t _bit = 0;
-volatile uint8_t _byte = 0;
-uint8_t _buff[BS];
-uint8_t *msg_buf;
 
-static Storage _storage = Storage();
-
-void onFrameRead()
+J1850_ERRORS J1850VPW::handleErrorsInternal(J1850_Operations op, J1850_ERRORS err)
 {
-    if (!IS_BETWEEN(_byte, 2, BS))
+    if (err != J1850_OK)
     {
-        return;
+        onErrorHandler errHandler = __errHandler;
+        if (errHandler)
+        {
+            errHandler(op, err);
+        }
     }
 
-    _storage.push(_buff, _byte);
+    return err;
 }
 
-class BitInfo
-{
-public:
-    bool isActive;
-    int length;
-};
-
-BitInfo bits[BS];
-
-void onRxChaged(uint8_t curr)
+void J1850VPW::onRxChaged(uint8_t curr)
 {
     _currState = curr;
     curr = !curr;
@@ -214,7 +173,24 @@ void onRxChaged(uint8_t curr)
     }
 }
 
-static void J1850VPW::setActiveLevel(uint8_t active)
+J1850VPW::J1850VPW() 
+: ACTIVE(LOW)
+, PASSIVE(HIGH)
+, RX(-1)
+, __rxPin(Pin())
+, __txPin(Pin())
+, _lastChange(micros())
+, _sofRead(false)
+, _currState(ACTIVE)
+, _bit(0)
+, _byte(0)
+, msg_buf(NULL)
+, _storage(Storage())
+, __errHandler(NULL)
+{
+}
+
+void J1850VPW::setActiveLevel(uint8_t active)
 {
     if (active == LOW)
     {
@@ -228,20 +204,21 @@ static void J1850VPW::setActiveLevel(uint8_t active)
     }
 }
 
-static void J1850VPW::init(uint8_t rxPin, uint8_t txPin)
+void J1850VPW::init(uint8_t rxPin, uint8_t txPin)
 {
     __rxPin = Pin(rxPin, PIN_MODE_INPUT_PULLUP);
     __rxPin.onDispose(detachInterruptsOnPinDisposed);
 
     _currState = __rxPin.read();
-    PCattachInterrupt(__rxPin.pin(), PIN_CHANGE_BOTH, onRxChaged);
+
+    PCattachInterrupt(__rxPin.pin(), PIN_CHANGE_BOTH, [](int state) { this->onRxChaged(state); });
     
     __txPin = Pin(txPin, PIN_MODE_OUTPUT);
     __txPin.write(PASSIVE);
 }
 
 // NB! Performance critical!!! Do not split
-static uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*/)
+uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*/)
 {
     if (__rxPin.isEmpty())
     {
@@ -349,12 +326,12 @@ stop:
     return handleErrorsInternal(J1850_Write, result);
 }
 
-static void J1850VPW::onError(onErrorHandler errHandler)
+void J1850VPW::onError(onErrorHandler errHandler)
 {
     __errHandler = errHandler;
 }
 
-static int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff, bool justValid /*= true*/)
+int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff, bool justValid /*= true*/)
 {
     uint8_t size;
 
@@ -373,4 +350,15 @@ static int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff, bool justValid /*= t
     }
 
     return size;
+}
+
+
+void J1850VPW::onFrameRead()
+{
+    if (!IS_BETWEEN(_byte, 2, BS))
+    {
+        return;
+    }
+
+    _storage.push(_buff, _byte);
 }

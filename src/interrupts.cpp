@@ -16,7 +16,7 @@ volatile uint8_t *port_to_pcmask[] = {
 
 static PIN_CHANGE PCintMode[24];
 
-volatile static funcPtr PCintFunc[24] = {NULL};
+volatile static void std::function<void(int)> PCintFunc[24] = {NULL};
 volatile static bool PCintActive[24] = {NULL};
 
 volatile static uint8_t PCintLast[3];
@@ -48,7 +48,7 @@ bool initPinInfo(uint8_t pin, uint8_t *pPort, uint8_t *pSlot)
     return true;
 }
 
-void PCattachInterrupt(uint8_t pin, PIN_CHANGE mode, funcPtr pFunc)
+void PCattachInterrupt(uint8_t pin, PIN_CHANGE mode, std::function<void(int)> pFunc)
 {
     uint8_t port;
     uint8_t slot;
