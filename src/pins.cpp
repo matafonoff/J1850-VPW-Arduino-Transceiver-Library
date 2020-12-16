@@ -109,7 +109,7 @@ static void turnOffPWM(uint8_t timer)
     }
 }
 
-bool Pin::isEmpty()
+bool Pin::isEmpty() const
 {
     return this->_reg == NULL;
 }
@@ -138,9 +138,9 @@ uint8_t Pin::read()
     return LOW;
 }
 
-void Pin::attachInterrupt(PIN_CHANGE changeType, funcPtr onPinChaged)
+void Pin::attachInterrupt(PIN_CHANGE changeType, pCallbackFunction onPinChaged, void* pData)
 {
-    PCattachInterrupt(this->_pin, changeType, onPinChaged);
+    PCattachInterrupt(this->_pin, changeType, onPinChaged, pData);
 }
 void Pin::detachInterrupt()
 {

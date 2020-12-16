@@ -12,11 +12,9 @@
 #include <stdlib.h>
 #include "interrupts.h"
 
-typedef unsigned long ulong;
-
 #define MAX(a, b) ((a) < (b) ? (b) : (a))
 
-#define MAX_uS ((ulong)-1L)
+#define MAX_uS ((unsigned long )-1L)
 
 #define RX_SOF_MIN (163)
 #define RX_SOF_MAX (239)
@@ -41,10 +39,6 @@ typedef unsigned long ulong;
 #define TX_EOF (280)  // End Of Frame nominal time
 
 #define IS_BETWEEN(x, min, max) (x >= min && x <= max)
-
-void detachInterruptsOnPinDisposed(Pin* p) {
-    PCdetachInterrupt(p->pin());
-}
 
 uint8_t crc(uint8_t *msg_buf, int8_t nbytes)
 {
@@ -91,13 +85,17 @@ J1850_ERRORS J1850VPW::handleErrorsInternal(J1850_Operations op, J1850_ERRORS er
     return err;
 }
 
+bool J1850VPW::isReadonly() const {
+    return __txPin.isEmpty();
+}
+
 void J1850VPW::onRxChaged(uint8_t curr)
 {
     _currState = curr;
     curr = !curr;
 
-    ulong now = micros();
-    ulong diff;
+    unsigned long  now = micros();
+    unsigned long  diff;
 
     if (now < _lastChange)
     {
@@ -188,9 +186,10 @@ J1850VPW::J1850VPW()
 , _storage(Storage())
 , __errHandler(NULL)
 {
+    listenAll();
 }
 
-void J1850VPW::setActiveLevel(uint8_t active)
+J1850VPW* J1850VPW::setActiveLevel(uint8_t active)
 {
     if (active == LOW)
     {
@@ -202,25 +201,39 @@ void J1850VPW::setActiveLevel(uint8_t active)
         ACTIVE = HIGH;
         PASSIVE = LOW;
     }
+
+    return this;
 }
 
-void J1850VPW::init(uint8_t rxPin, uint8_t txPin)
+J1850VPW* J1850VPW::init(uint8_t rxPin, uint8_t txPin)
+{
+    init(rxPin);
+
+    __txPin = Pin(txPin, PIN_MODE_OUTPUT);
+    __txPin.write(PASSIVE);
+
+    return this;
+}
+
+void J1850VPWFriend::__handleRnChange(int state, void* pData) {
+    ((J1850VPW*)pData)->onRxChaged(state);
+}
+
+J1850VPW* J1850VPW::init(uint8_t rxPin) 
 {
     __rxPin = Pin(rxPin, PIN_MODE_INPUT_PULLUP);
-    __rxPin.onDispose(detachInterruptsOnPinDisposed);
 
     _currState = __rxPin.read();
 
-    PCattachInterrupt(__rxPin.pin(), PIN_CHANGE_BOTH, [](int state) { this->onRxChaged(state); });
-    
-    __txPin = Pin(txPin, PIN_MODE_OUTPUT);
-    __txPin.write(PASSIVE);
+    __rxPin.attachInterrupt(PIN_CHANGE_BOTH, &J1850VPWFriend::__handleRnChange, this);
+
+    return this;
 }
 
 // NB! Performance critical!!! Do not split
 uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*/)
 {
-    if (__rxPin.isEmpty())
+    if (isReadonly())
     {
         return handleErrorsInternal(J1850_Write, J1850_ERR_RECV_NOT_CONFIGURATED);
     }
@@ -241,7 +254,7 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     // }
     // Serial.println();
     
-    PCpauseInterrupt(__rxPin.pin());
+    __rxPin.pauseInterrupts();
 
     uint8_t *msg_buf = buff;
     unsigned long now;
@@ -250,7 +263,7 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     if (timeoutMs >= 0)
     {
         now = micros();
-        ulong start = now;
+        unsigned long  start = now;
         timeoutMs *= 1000; // convert to microseconds
         while (micros() - now < TX_EOF)
         {
@@ -278,7 +291,7 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     {
         uint8_t temp_byte = *msg_buf; // store byte temporary
         uint8_t nbits = 8;
-        ulong delay;
+        unsigned long  delay;
         while (nbits--) // send 8 bits
         {
             if (nbits & 1) // start allways with passive symbol
@@ -322,13 +335,14 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     }
 
 stop:
-    PCresumeInterrupt(__rxPin.pin());
+    __rxPin.resumeInterrupts();
     return handleErrorsInternal(J1850_Write, result);
 }
 
-void J1850VPW::onError(onErrorHandler errHandler)
+J1850VPW* J1850VPW::onError(onErrorHandler errHandler)
 {
     __errHandler = errHandler;
+    return this;
 }
 
 int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff, bool justValid /*= true*/)
@@ -360,5 +374,59 @@ void J1850VPW::onFrameRead()
         return;
     }
 
-    _storage.push(_buff, _byte);
+    uint8_t *pByte, bit;
+    
+    pByte = getBit(_buff[0], &bit);
+    if (pByte && (*pByte & (1 << bit)) == 0) {
+        _storage.push(_buff, _byte);
+    }
+}
+
+
+J1850VPW* J1850VPW::listenAll() {
+    memset(_ignoreList, 0, sizeof(_ignoreList));
+    return this;
+}
+
+J1850VPW* J1850VPW::listen(uint8_t *ids) {
+    uint8_t *pByte, bit;
+    while (*ids) {
+        pByte = getBit(*ids, &bit);
+
+        if (pByte) {
+            *pByte &= ~(1 << bit);
+        }
+
+        ids++;
+    }
+    return this;
+}
+
+J1850VPW* J1850VPW::ignoreAll() {
+    memset(_ignoreList, 0xff, sizeof(_ignoreList));
+    return this;
+}
+
+J1850VPW* J1850VPW::ignore(uint8_t *ids) {
+    uint8_t *pByte, bit;
+    while (*ids) {
+        pByte = getBit(*ids, &bit);
+
+        if (pByte) {
+            *pByte |= 1 << bit;
+        }
+
+        ids++;
+    }
+    return this;
+}
+
+uint8_t* J1850VPW::getBit(uint8_t id, uint8_t *pBit) {
+    if (!id) {
+        *pBit = 0xff;
+        return NULL;
+    }
+
+    *pBit = id % 8;
+    return &(_ignoreList[id / 8]);
 }

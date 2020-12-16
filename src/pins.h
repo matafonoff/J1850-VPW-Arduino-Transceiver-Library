@@ -33,9 +33,9 @@ public:
     void write(uint8_t val);
     uint8_t read();
 
-    bool isEmpty();
+    bool isEmpty() const;
 
-    void attachInterrupt(PIN_CHANGE changeType, funcPtr onPinChaged);
+    void attachInterrupt(PIN_CHANGE changeType, pCallbackFunction onPinChaged, void* pData);
     void detachInterrupt();
 
     void resumeInterrupts();

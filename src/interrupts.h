@@ -9,7 +9,6 @@
 **************************************************************************/
 #pragma once
 #include <Arduino.h>
-#include <functional>
 
 enum PIN_CHANGE {
     PIN_CHANGE_BOTH = 3,
@@ -17,7 +16,9 @@ enum PIN_CHANGE {
     PIN_CHANGE_FALL = 2
 };
 
-void PCattachInterrupt(uint8_t pin, PIN_CHANGE mode, std::function<void(int)> pFunc);
+typedef void (*pCallbackFunction)(int state, void* pData);
+
+void PCattachInterrupt(uint8_t pin, PIN_CHANGE mode, pCallbackFunction pFunc, void* pData);
 
 void PCdetachInterrupt(uint8_t pin);
 

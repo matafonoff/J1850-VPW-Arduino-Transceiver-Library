@@ -16,7 +16,8 @@ volatile uint8_t *port_to_pcmask[] = {
 
 static PIN_CHANGE PCintMode[24];
 
-volatile static void std::function<void(int)> PCintFunc[24] = {NULL};
+volatile static pCallbackFunction PCintFunc[24] = {NULL};
+volatile static void* PCintData[24] = {NULL};
 volatile static bool PCintActive[24] = {NULL};
 
 volatile static uint8_t PCintLast[3];
@@ -48,7 +49,7 @@ bool initPinInfo(uint8_t pin, uint8_t *pPort, uint8_t *pSlot)
     return true;
 }
 
-void PCattachInterrupt(uint8_t pin, PIN_CHANGE mode, std::function<void(int)> pFunc)
+void PCattachInterrupt(uint8_t pin, PIN_CHANGE mode, pCallbackFunction pFunc, void* pData)
 {
     uint8_t port;
     uint8_t slot;
@@ -63,6 +64,7 @@ void PCattachInterrupt(uint8_t pin, PIN_CHANGE mode, std::function<void(int)> pF
 
     PCintMode[slot] = mode;
     PCintFunc[slot] = pFunc;
+    PCintData[slot] = pData;
     PCintActive[slot] = true;
 
     // set the mask
@@ -156,7 +158,7 @@ static void PCint(uint8_t port)
             if ((PCintFunc[pin] != NULL && PCintActive[pin]) &&
                 (PCintMode[pin] == PIN_CHANGE_BOTH || ((PCintMode[pin] == PIN_CHANGE_RISE) && currValue) || ((PCintMode[pin] == PIN_CHANGE_FALL) && !currValue)))
             {
-                PCintFunc[pin](currValue);
+                PCintFunc[pin](currValue, PCintData[pin]);
             }
         }
     }
