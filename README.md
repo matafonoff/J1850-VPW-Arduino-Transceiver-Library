@@ -114,3 +114,12 @@ void handleError(J1850_Operations op, J1850_ERRORS err)
 
 #### Based on:
 1. Some code from wiring sources of arduino to implement fast digital IO.
+
+## NB!
+This software was developed to be used with Chrysler vehicles in a mind. This means that the current protocol implementation misses some features like (IFR).
+
+If you have any ideas of how to implement features you need - feel free to make a pull request. In this case you will be mentioned as a library developer and this library will be developed much faster.
+
+## P.S.
+This library is rewritten by me to SM chips and I'm working on that code primerially. 
+This means I have little time to support Arduino implementation. So if you have any code updates - feel free to use pull requests.
