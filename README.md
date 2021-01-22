@@ -26,11 +26,13 @@ Connections:
 
 void handleError(J1850_Operations op, J1850_ERRORS err);
 
+J1850VPW vpw;
+
 void setup()
 {
     Serial.begin(115200);           // start serial port
-    J1850VPW::onError(handleError); // listen for errors
-    J1850VPW::init(RX, TX);         // init transceiver
+    vpw.onError(handleError); // listen for errors
+    vpw.init(RX, TX);         // init transceiver
 }
 
 void loop()
@@ -41,7 +43,7 @@ void loop()
     uint8_t dataSize; // size of message
 
     // read all messages with valid CRC from cache
-    while (dataSize = J1850VPW::tryGetReceivedFrame(buff))
+    while (dataSize = vpw.tryGetReceivedFrame(buff))
     {
         String s;
 
@@ -66,7 +68,7 @@ void loop()
     }
 
     // write simple message to bus
-    J1850VPW::send(sendBuff, sizeof(sendBuff));
+    vpw.send(sendBuff, sizeof(sendBuff));
 
     delay(1000);
 }
