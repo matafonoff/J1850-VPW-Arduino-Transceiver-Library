@@ -22,7 +22,8 @@ enum J1850_ERRORS {
     J1850_ERR_PULSE_TOO_SHORT       = 0x85,
     J1850_ERR_PULSE_OUTSIDE_FRAME   = 0x86,
     J1850_ERR_ARBITRATION_LOST      = 0x87,
-    J1850_ERR_PULSE_TOO_LONG        = 0x88
+    J1850_ERR_PULSE_TOO_LONG        = 0x88,
+    J1850_ERR_IFR_RX_NOT_SUPPORTED  = 0x89
 };
 
 enum J1850_Operations {
@@ -59,6 +60,7 @@ private:
     volatile uint8_t _currState;
     volatile uint8_t _bit;
     volatile uint8_t _byte;
+    volatile bool _IFRDetected;
     uint8_t _buff[BS];
     uint8_t *msg_buf;
 
