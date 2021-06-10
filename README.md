@@ -106,6 +106,9 @@ void handleError(J1850_Operations op, J1850_ERRORS err)
     case J1850_ERR_PULSE_TOO_LONG:
         Serial.println(s + "J1850_ERR_PULSE_TOO_LONG");
         break;
+    case J1850_ERR_IFR_RX_NOT_SUPPORTED:
+        Serial.println(s + "J1850_ERR_IFR_RX_NOT_SUPPORTED");
+        break;
     default:
         // unknown error
         Serial.println(s + "ERR: " + String(err, HEX));

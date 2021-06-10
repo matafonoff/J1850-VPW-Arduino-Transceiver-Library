@@ -125,6 +125,7 @@ void J1850VPW::onRxChaged(uint8_t curr)
             _bit = 0;
             msg_buf = _buff;
             *msg_buf = 0;
+            _IFRDetected = false;
         }
         else
         {
@@ -144,17 +145,25 @@ void J1850VPW::onRxChaged(uint8_t curr)
             onFrameRead();
             return;
         }
-
-        if (IS_BETWEEN(diff, RX_LONG_MIN, RX_LONG_MAX))
+        if (!_IFRDetected && IS_BETWEEN(diff, RX_EOD_MIN, RX_EOD_MAX))
+        {
+            // data ended and IFR detected - set flag to ignore the incoming IFR and flag error
+            _IFRDetected = true;
+            handleErrorsInternal(J1850_Read, J1850_ERR_IFR_RX_NOT_SUPPORTED);
+            return;
+        }
+        if (!_IFRDetected && IS_BETWEEN(diff, RX_LONG_MIN, RX_LONG_MAX))
         {
             *msg_buf |= 1;
         }
     }
-    else if (diff <= RX_SHORT_MAX)
+    else if (!_IFRDetected)
     {
-        *msg_buf |= 1;
+        if (diff <= RX_SHORT_MAX)
+        {
+            *msg_buf |= 1;
+        }
     }
-
     _bit++;
     if (_bit == 8)
     {
