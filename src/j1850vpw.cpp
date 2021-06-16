@@ -184,6 +184,7 @@ void J1850VPW::onRxChaged(uint8_t curr)
         _sofRead = false;
         if (!_IFRDetected)
         {
+            onFrameRead();
         }
     }
 }
