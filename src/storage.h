@@ -11,7 +11,7 @@
 #include "common.h"
 
 #ifndef STORAGE_SIZE
-#define STORAGE_SIZE 20
+#define STORAGE_SIZE 10
 #endif
 
 class StorageItem
