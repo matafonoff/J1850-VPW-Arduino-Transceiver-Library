@@ -142,7 +142,10 @@ void J1850VPW::onRxChaged(uint8_t curr)
             // data ended - copy package to buffer
             _sofRead = false;
 
-            onFrameRead();
+            if (!_IFRDetected)
+            {
+                    onFrameRead();
+            }
             return;
         }
         if (!_IFRDetected && IS_BETWEEN(diff, RX_EOD_MIN, RX_EOD_MAX))
@@ -150,6 +153,7 @@ void J1850VPW::onRxChaged(uint8_t curr)
             // data ended and IFR detected - set flag to ignore the incoming IFR and flag error
             _IFRDetected = true;
             handleErrorsInternal(J1850_Read, J1850_ERR_IFR_RX_NOT_SUPPORTED);
+            onFrameRead();
             return;
         }
         if (!_IFRDetected && IS_BETWEEN(diff, RX_LONG_MIN, RX_LONG_MAX))
@@ -164,19 +168,23 @@ void J1850VPW::onRxChaged(uint8_t curr)
             *msg_buf |= 1;
         }
     }
-    _bit++;
-    if (_bit == 8)
+    if(!_IFRDetected)
     {
-        _byte++;
-        msg_buf++;
-        *msg_buf = 0;
-        _bit = 0;
-    }
-
+        _bit++;
+        if (_bit == 8)
+        {
+            _byte++;
+            msg_buf++;
+            *msg_buf = 0;
+            _bit = 0;
+        }
+    }    
     if (_byte == BS)
     {
         _sofRead = false;
-        onFrameRead();
+        if (!_IFRDetected)
+        {
+        }
     }
 }
 
@@ -263,7 +271,6 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     // }
     // Serial.println();
     
-    __rxPin.pauseInterrupts();
 
     uint8_t *msg_buf = buff;
     unsigned long now;
@@ -290,6 +297,7 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     }
 
     // SOF
+    __rxPin.pauseInterrupts();
     __txPin.write(ACTIVE);
     now = micros();
     while (micros() - now < TX_SOF)
@@ -357,6 +365,7 @@ J1850VPW* J1850VPW::onError(onErrorHandler errHandler)
 int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff, bool justValid /*= true*/)
 {
     uint8_t size;
+    bool crcOK = true;
 
     while (true)
     {
@@ -365,8 +374,12 @@ int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff, bool justValid /*= true*/)
         {
             return 0;
         }
-
-        if (!justValid || crc(pBuff, size - 1) == pBuff[size - 1])
+        if (crc(pBuff, size - 1) != pBuff[size - 1])
+        {
+            crcOK = false;
+            handleErrorsInternal(J1850_Read, J1850_ERR_CRC);
+        }
+        if (!justValid || crcOK)
         {
             break;
         }
