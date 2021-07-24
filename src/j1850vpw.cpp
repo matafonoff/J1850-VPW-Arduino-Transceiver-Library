@@ -24,9 +24,12 @@
 
 #define RX_SHORT_MIN (34) // minimum short pulse time
 #define RX_SHORT_MAX (96) // maximum short pulse time
+#define RX_SHORT_IGNORE (5) // Ignore pulses shorter than this to reduce noise
 
 #define RX_LONG_MIN (97)  // minimum long pulse time
 #define RX_LONG_MAX (163) // maximum long pulse time
+
+#define RX_ARBITRATION_TOL (10) // Tolerance for shorter passive pulses from other modules during arbitration
 
 #define RX_EOD_MAX (239) // maximum end of data time
 
@@ -105,6 +108,11 @@ void J1850VPW::onRxChaged(uint8_t curr)
     else
     {
         diff = now - _lastChange;
+    }
+
+    if (diff < RX_SHORT_IGNORE) //We filter out some noise for very short pulses around the transition
+    {
+        return;
     }
 
     _lastChange = now;
@@ -321,8 +329,14 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
                 {
                     if (__rxPin.read() == ACTIVE)
                     {
-                        result = J1850_ERR_ARBITRATION_LOST;
-                        goto stop;
+                        if (delay - (micros() - now)  < RX_ARBITRATION_TOL)
+                        {
+                            now = micros() - delay - 1; //resync to faster module
+                        } else //We lost arbitration so drop out
+                        {
+                            result = J1850_ERR_ARBITRATION_LOST;
+                            goto stop;
+                        }
                     }
                 }
             }
