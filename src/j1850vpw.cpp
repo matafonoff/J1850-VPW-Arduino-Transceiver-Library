@@ -30,6 +30,8 @@
 #define RX_LONG_MAX (163) // maximum long pulse time
 
 #define RX_ARBITRATION_TOL (10) // Tolerance for shorter passive pulses from other modules during arbitration
+#define PROPOGATION_DELAY  (10)  //Propogation delay from driving output Passive to checking input follows 
+
 
 #define RX_EOD_MAX (239) // maximum end of data time
 
@@ -325,11 +327,12 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
                 delay = (temp_byte & 0x80) ? TX_LONG : TX_SHORT; // send correct pulse lenght
                 __txPin.write(PASSIVE);                          // set bus active
                 now = micros();
+                delayMicroseconds(PROPOGATION_DELAY);            // Allow time for RX to follow TX for fast processors
                 while (micros() - now < delay)
                 {
                     if (__rxPin.read() == ACTIVE)
                     {
-                        if (delay - (micros() - now)  < RX_ARBITRATION_TOL)
+                        if (delay - (micros() - now)  < RX_ARBITRATION_TOL) //Arbitration not lost
                         {
                             now = micros() - delay - 1; //resync to faster module
                         } else //We lost arbitration so drop out
@@ -357,6 +360,7 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     // EOF
     __txPin.write(PASSIVE);
     now = micros();
+    delayMicroseconds(PROPOGATION_DELAY);            // Allow time for RX to follow TX for fast processors
     while (micros() - now < TX_SOF)
     {
         if (__rxPin.read() == ACTIVE)
