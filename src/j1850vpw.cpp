@@ -24,9 +24,14 @@
 
 #define RX_SHORT_MIN (34) // minimum short pulse time
 #define RX_SHORT_MAX (96) // maximum short pulse time
+#define RX_SHORT_IGNORE (5) // Ignore pulses shorter than this to reduce noise
 
 #define RX_LONG_MIN (97)  // minimum long pulse time
 #define RX_LONG_MAX (163) // maximum long pulse time
+
+#define RX_ARBITRATION_TOL (10) // Tolerance for shorter passive pulses from other modules during arbitration
+#define PROPOGATION_DELAY  (10)  //Propogation delay from driving output Passive to checking input follows 
+
 
 #define RX_EOD_MAX (239) // maximum end of data time
 
@@ -107,6 +112,11 @@ void J1850VPW::onRxChaged(uint8_t curr)
         diff = now - _lastChange;
     }
 
+    if (diff < RX_SHORT_IGNORE) //We filter out some noise for very short pulses around the transition
+    {
+        return;
+    }
+
     _lastChange = now;
 
     if (diff < RX_SHORT_MIN)
@@ -142,7 +152,10 @@ void J1850VPW::onRxChaged(uint8_t curr)
             // data ended - copy package to buffer
             _sofRead = false;
 
-            onFrameRead();
+            if (!_IFRDetected)
+            {
+                    onFrameRead();
+            }
             return;
         }
         if (!_IFRDetected && IS_BETWEEN(diff, RX_EOD_MIN, RX_EOD_MAX))
@@ -150,6 +163,7 @@ void J1850VPW::onRxChaged(uint8_t curr)
             // data ended and IFR detected - set flag to ignore the incoming IFR and flag error
             _IFRDetected = true;
             handleErrorsInternal(J1850_Read, J1850_ERR_IFR_RX_NOT_SUPPORTED);
+            onFrameRead();
             return;
         }
         if (!_IFRDetected && IS_BETWEEN(diff, RX_LONG_MIN, RX_LONG_MAX))
@@ -164,19 +178,24 @@ void J1850VPW::onRxChaged(uint8_t curr)
             *msg_buf |= 1;
         }
     }
-    _bit++;
-    if (_bit == 8)
+    if(!_IFRDetected)
     {
-        _byte++;
-        msg_buf++;
-        *msg_buf = 0;
-        _bit = 0;
-    }
-
+        _bit++;
+        if (_bit == 8)
+        {
+            _byte++;
+            msg_buf++;
+            *msg_buf = 0;
+            _bit = 0;
+        }
+    }    
     if (_byte == BS)
     {
         _sofRead = false;
-        onFrameRead();
+        if (!_IFRDetected)
+        {
+            onFrameRead();
+        }
     }
 }
 
@@ -263,7 +282,6 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     // }
     // Serial.println();
     
-    __rxPin.pauseInterrupts();
 
     uint8_t *msg_buf = buff;
     unsigned long now;
@@ -290,6 +308,7 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     }
 
     // SOF
+    __rxPin.pauseInterrupts();
     __txPin.write(ACTIVE);
     now = micros();
     while (micros() - now < TX_SOF)
@@ -308,12 +327,19 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
                 delay = (temp_byte & 0x80) ? TX_LONG : TX_SHORT; // send correct pulse lenght
                 __txPin.write(PASSIVE);                          // set bus active
                 now = micros();
+                delayMicroseconds(PROPOGATION_DELAY);            // Allow time for RX to follow TX for fast processors
                 while (micros() - now < delay)
                 {
                     if (__rxPin.read() == ACTIVE)
                     {
-                        result = J1850_ERR_ARBITRATION_LOST;
-                        goto stop;
+                        if (delay - (micros() - now)  < RX_ARBITRATION_TOL) //Arbitration not lost
+                        {
+                            now = micros() - delay - 1; //resync to faster module
+                        } else //We lost arbitration so drop out
+                        {
+                            result = J1850_ERR_ARBITRATION_LOST;
+                            goto stop;
+                        }
                     }
                 }
             }
@@ -334,6 +360,7 @@ uint8_t J1850VPW::send(uint8_t *pData, uint8_t nbytes, int16_t timeoutMs /*= -1*
     // EOF
     __txPin.write(PASSIVE);
     now = micros();
+    delayMicroseconds(PROPOGATION_DELAY);            // Allow time for RX to follow TX for fast processors
     while (micros() - now < TX_SOF)
     {
         if (__rxPin.read() == ACTIVE)
@@ -357,6 +384,7 @@ J1850VPW* J1850VPW::onError(onErrorHandler errHandler)
 int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff, bool justValid /*= true*/)
 {
     uint8_t size;
+    bool crcOK = true;
 
     while (true)
     {
@@ -365,8 +393,12 @@ int8_t J1850VPW::tryGetReceivedFrame(uint8_t *pBuff, bool justValid /*= true*/)
         {
             return 0;
         }
-
-        if (!justValid || crc(pBuff, size - 1) == pBuff[size - 1])
+        if (crc(pBuff, size - 1) != pBuff[size - 1])
+        {
+            crcOK = false;
+            handleErrorsInternal(J1850_Read, J1850_ERR_CRC);
+        }
+        if (!justValid || crcOK)
         {
             break;
         }
